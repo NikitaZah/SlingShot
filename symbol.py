@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 
 
 class TradeData:
-    def __init__(self, side: str, orig_qty: Decimal, start_price: Decimal, stop_loss_price: Decimal, stop_loss_order,
+    def __init__(self, side: str, orig_qty: Decimal, start_price: Decimal, stop_loss_price, stop_loss_order,
                  stop_loss_type: str):
         self.start_date: datetime = datetime.now()
         self.start_price = start_price
@@ -41,8 +41,10 @@ class TradeData:
         self.addons += 1
         self.result -= qty * price * Decimal(0.0004)
 
+        response = {'stop_loss': None}
         if self.stop_loss_type == 'STOP_MARKET':    # price where  should be moved stop loss market
-            return self.current_price
+            response['stop_loss'] = self.current_price
+        return response
 
     def fix(self, qty: Decimal, price: Decimal):
         self.current_quantity -= qty
@@ -52,16 +54,17 @@ class TradeData:
         self.result += (price - self.current_price) * qty if self.side == 'BUY' else -(price - self.current_price) * qty
         self.result -= qty * price * Decimal(0.0004)
 
+        response = {'result': self.result, 'stop_loss': None, 'closed': False}
         if self.current_quantity > 0:
             if self.stop_loss_type == 'STOP_MARKET':    # price where should be moved stop loss market
                 if self.side == 'BUY':
                     if price > self.current_price * (1 + self.stop_loss_percent):
-                        return {'stop_loss': self.current_price}
+                        response['stop_loss'] = self.current_price
                 else:
                     if price < self.current_price * (1 - self.stop_loss_percent):
-                        return {'stop_loss': self.current_price}
+                        response['stop_loss'] = self.current_price
         else:
-            return {'result': self.result}
+            response['closed'] = True
 
     def fix_allowed(self):
         return self.last_addon_time < datetime.now() - timedelta(hours=3)
@@ -86,7 +89,7 @@ class Symbol:
         self.in_trade = False
         self.trade_data = None
 
-    def start_trade(self, side: str, orig_qty: Decimal, start_price: Decimal, stop_loss_price: Decimal, stop_loss_order,
+    def start_trade(self, side: str, orig_qty: Decimal, start_price: Decimal, stop_loss_price, stop_loss_order,
                     stop_loss_kind):
         self.in_trade = True
         self.trade_data = TradeData(side, orig_qty, start_price, stop_loss_price, stop_loss_order, stop_loss_kind)
