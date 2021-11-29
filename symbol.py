@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 class TradeData:
     def __init__(self, side: str, orig_qty: Decimal, start_price: Decimal, stop_loss_price: Decimal, stop_loss_order,
-                 stop_loss_kind: str):
+                 stop_loss_type: str):
         self.start_date: datetime = datetime.now()
         self.start_price = start_price
         self.original_quantity = orig_qty
@@ -17,10 +17,11 @@ class TradeData:
 
         self.last_addon_time = self.start_date
         self.last_fix_time = None
+        self.last_fix_price = None
 
         self.stop_loss_price = stop_loss_price
         self.stop_loss = stop_loss_order
-        self.stop_loss_kind = stop_loss_kind
+        self.stop_loss_type = stop_loss_type
 
         self.stop_loss_percent = abs((self.stop_loss_price / self.start_price - 1).quantize(Decimal('0.01')))
 
@@ -40,23 +41,36 @@ class TradeData:
         self.addons += 1
         self.result -= qty * price * Decimal(0.0004)
 
-        if self.stop_loss_kind == 'STOP_MARKET':    # price where  should be moved stop loss market
+        if self.stop_loss_type == 'STOP_MARKET':    # price where  should be moved stop loss market
             return self.current_price
 
     def fix(self, qty: Decimal, price: Decimal):
         self.current_quantity -= qty
         self.last_fix_time = datetime.now()
         self.fixes += 1
+        self.last_fix_price = price
         self.result += (price - self.current_price) * qty if self.side == 'BUY' else -(price - self.current_price) * qty
         self.result -= qty * price * Decimal(0.0004)
 
-        if self.stop_loss_kind == 'STOP_MARKET':    # price where should be moved stop loss market
-            if self.side == 'BUY':
-                if price > self.current_price * (1 + self.stop_loss_percent):
-                    return self.current_price
-            else:
-                if price < self.current_price * (1 - self.stop_loss_percent):
-                    return self.current_price
+        if self.current_quantity > 0:
+            if self.stop_loss_type == 'STOP_MARKET':    # price where should be moved stop loss market
+                if self.side == 'BUY':
+                    if price > self.current_price * (1 + self.stop_loss_percent):
+                        return {'stop_loss': self.current_price}
+                else:
+                    if price < self.current_price * (1 - self.stop_loss_percent):
+                        return {'stop_loss': self.current_price}
+        else:
+            return {'result': self.result}
+
+    def fix_allowed(self):
+        return self.last_addon_time < datetime.now() - timedelta(hours=3)
+
+    def addon_allowed(self, price: Decimal):
+        if self.side == 'BUY':
+            return self.current_price * Decimal('1.08') < price
+        else:
+            return self.current_price * Decimal('0.92') > price
 
 
 class Symbol:
@@ -72,9 +86,14 @@ class Symbol:
         self.in_trade = False
         self.trade_data = None
 
-    def start_trade(self, side: str, orig_qty: Decimal, start_price: Decimal, stop_loss_price: Decimal, stop_loss_order):
+    def start_trade(self, side: str, orig_qty: Decimal, start_price: Decimal, stop_loss_price: Decimal, stop_loss_order,
+                    stop_loss_kind):
         self.in_trade = True
-        self.trade_data = TradeData(side, orig_qty, start_price, stop_loss_price, stop_loss_order)
+        self.trade_data = TradeData(side, orig_qty, start_price, stop_loss_price, stop_loss_order, stop_loss_kind)
+
+    def close_position(self):
+        self.in_trade = False
+        self.trade_data = None
 
     def fix_qty(self, parts: int):
         if not self.in_trade:
@@ -101,14 +120,13 @@ class Symbol:
             print(f'{self.symbol} is not in trade. Attempt to update data failed')
             return None
         if side == self.trade_data.side:
-            self.trade_data.addon(qty, price, self.price_step)
+            return self.trade_data.addon(qty, price, self.price_step)
         else:
-            self.trade_data.fix(qty, price)
-            if self.trade_data.current_quantity == 0:
-                result = self.trade_data.result
-                self.in_trade = False
-                self.trade_data = None
-                return result
+            return self.trade_data.fix(qty, price)
+
+    def update_stop_loss(self, new_sl: int, new_sl_price: Decimal):
+        self.trade_data.stop_loss = new_sl
+        self.trade_data.stop_loss_price = new_sl_price
 
     def quantity(self, price: Decimal, quote_qty: Decimal):
         qty = (quote_qty / price).quantize(self.lot_step, rounding=ROUND_DOWN)
@@ -124,3 +142,8 @@ class Symbol:
 
         return price.quantize(self.price_step)
 
+    def trade_or_addon_allowed(self, price: Decimal):
+        if not self.in_trade:
+            return True
+        else:
+            return self.trade_data.addon_allowed(price)

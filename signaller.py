@@ -1,12 +1,17 @@
 import pandas as pd
 from getter import Get
 from symbol import Symbol
+from decimal import *
 
 
 class Signal:
-    def __init__(self, get: Get, trend: int = None):
+    def __init__(self, get: Get, trend: int, required_volume: Decimal, required_volatility: Decimal,
+                 extra_fix_signal_percent: Decimal):
         self.get = get
         self.main_trend = trend
+        self.required_volume = required_volume
+        self.required_volatility = required_volatility
+        self.extra_fix_signal_percent = extra_fix_signal_percent
 
     @staticmethod
     def __ewm(source: pd.DataFrame, length: int) -> pd.DataFrame:
@@ -55,6 +60,10 @@ class Signal:
         return trend
 
     def __buy_signal(self, candles: pd.DataFrame):
+        trend = self.__slingshot(candles)
+        if trend.iloc[trend.size - 1] <= 0:
+            return False
+
         slow_ewm = self.__ewm(candles['close'], 62)
 
         if candles['close'].iloc[candles['close'].size - 2] < slow_ewm.iloc[slow_ewm.size - 2]:
@@ -63,7 +72,11 @@ class Signal:
                 return True
         return False
 
-    def __sell_signal(self, candles):
+    def __sell_signal(self, candles: pd.DataFrame):
+        trend = self.__slingshot(candles)
+        if trend.iloc[trend.size - 1] >= 0:
+            return False
+
         slow_ewm = self.__ewm(candles['close'], 62)
 
         if candles['close'].iloc[candles['close'].size - 2] > slow_ewm.iloc[slow_ewm.size - 2]:
@@ -72,19 +85,44 @@ class Signal:
                 return True
         return False
 
-    def __fix_signal(self, candles):
+    def __fix_signal(self, symbol: Symbol, candles: pd.DataFrame):
         k_line, d_line = self.__stoch_rsi(candles, 14)
-        if self.main_trend == 1:
+        if symbol.trade_data.side == 'BUY':
             if d_line[d_line.size - 1] > k_line[k_line.size - 1] > 80:
                 return True
-        if self.main_trend == -1:
+        if symbol.trade_data.side == 'SELL':
             if d_line[d_line.size - 1] < k_line[k_line.size - 1] < 20:
                 return True
+
         return False
 
-    def __close_signal(self, candles):
-        k_line, d_line = self.__stoch_rsi(candles, 14)
+    def __extra_fix_signal(self, symbol: Symbol, price):
+        if symbol.trade_data.side == 'BUY':
+            if not symbol.trade_data.last_fix_price:
+                if price > (1 + self.extra_fix_signal_percent) * symbol.trade_data.current_price:
+                    return True
+            else:
+                if price > (1 + self.extra_fix_signal_percent) * symbol.trade_data.last_fix_price:
+                    return True
+        if symbol.trade_data.side == 'SELL':
+            if not symbol.trade_data.last_fix_price:
+                if price < (1 - self.extra_fix_signal_percent) * symbol.trade_data.current_price:
+                    return True
+            else:
+                if price < (1 - self.extra_fix_signal_percent) * symbol.trade_data.last_fix_price:
+                    return True
+        return False
 
+    def __close_signal(self, symbol: Symbol, candles: pd.DataFrame):
+        k_line, d_line = self.__stoch_rsi(candles, 14)
+        trend = self.__slingshot(candles)
+        if symbol.trade_data.side == 'BUY' and trend.iloc[trend.size - 1] < 0:
+            if d_line[d_line.size - 1] > k_line[k_line.size - 1]:
+                return True
+        elif symbol.trade_data.side == 'SELL' and trend.iloc[trend.size - 1] > 0:
+            if d_line[d_line.size - 1] < k_line[k_line.size - 1]:
+                return True
+        return False
 
     def set_trend(self, symbol: Symbol):
         candles = self.get.candles(symbol, '4h', to_df=True)
@@ -97,8 +135,26 @@ class Signal:
     def get_trend(self):
         return self.main_trend
 
-    def slingshot_signal(self, symbol: Symbol):
-        pass
+    def slingshot_signal(self, symbol: Symbol) -> str:
+        candles = self.get.candles(symbol, '1h', to_df=True)
+        closes = candles['close']
+        price = closes.iloc[closes.size - 1]
+
+        if symbol.trade_or_addon_allowed(price):
+            if self.get.volume(symbol) > self.required_volume and abs(self.get.volatility(symbol)) > self.required_volatility:
+                if self.main_trend == 1:
+                    if self.__buy_signal(candles):
+                        return 'BUY'
+                else:
+                    if self.__sell_signal(candles):
+                        return 'SELL'
+        if symbol.in_trade:
+            if self.__close_signal(symbol, candles):
+                return 'CLOSE'
+            if self.__fix_signal(symbol, candles) or self.__extra_fix_signal(symbol, price):
+                return 'FIX'
+        return ''
+
 
 
 
