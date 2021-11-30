@@ -17,12 +17,21 @@ class SlingShotBot:
         self.order_percent = order_percent
         self.sl_percent = sl_percent
         self.sl_type = sl_type
-        self.main_trend = main_trend
         self.symbols = self.get.symbols()
         self.max_fix_times = max_fix_times
 
+        if main_trend:
+            self.main_trend = main_trend
+        else:
+            self.main_trend = self.set_trend()
+
     def restore_data(self):
         pass
+
+    def set_trend(self):
+        for symbol in self.symbols:
+            if symbol.symbol == 'BTCUSDT':
+                return self.signal.set_trend(symbol)
 
     def new_position(self, symbol: Symbol):
         signal = self.signal.slingshot_signal(symbol)

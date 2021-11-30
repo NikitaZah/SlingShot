@@ -5,7 +5,7 @@ from decimal import *
 
 
 class Signal:
-    def __init__(self, get: Get, trend: int, required_volume: Decimal, required_volatility: Decimal,
+    def __init__(self, get: Get, trend, required_volume: Decimal, required_volatility: Decimal,
                  extra_fix_signal_percent: Decimal):
         self.get = get
         self.main_trend = trend
@@ -131,6 +131,7 @@ class Signal:
             self.main_trend = -1
         else:
             self.main_trend = 1
+        return self.main_trend
 
     def get_trend(self):
         return self.main_trend

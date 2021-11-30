@@ -10,18 +10,15 @@ class Get:
 
     @staticmethod
     def __candles_to_df(candles: list):
-        open_time, close_time, high_price, low_price, open_price, close_price, volume, cash_volume, trades_number = \
-            [], [], [], [], [], [], [], [], []
-        for candle in candles:
-            open_time.append(int(candle[0]))
-            close_time.append(int(candle[6]))
-            high_price.append(Decimal(candle[2]))
-            low_price.append(Decimal(candle[3]))
-            open_price.append(Decimal(candle[1]))
-            close_price.append(Decimal(candle[4]))
-            volume.append(Decimal(candle[5]))
-            cash_volume.append(Decimal(candle[7]))
-            trades_number.append(int(candle[8]))
+        open_time = [int(candle[0]) for candle in candles]
+        close_time = [int(candle[6]) for candle in candles]
+        high_price = [Decimal(candle[2]) for candle in candles]
+        low_price = [Decimal(candle[3]) for candle in candles]
+        open_price = [Decimal(candle[3]) for candle in candles]
+        close_price = [Decimal(candle[4]) for candle in candles]
+        volume = [Decimal(candle[5]) for candle in candles]
+        cash_volume = [Decimal(candle[7]) for candle in candles]
+        trades_number = [int(candle[8]) for candle in candles]
 
         data = {'open_time': open_time, 'close_time': close_time, 'high': high_price, 'low': low_price,
                 'open': open_price, 'close': close_price, 'volume': volume, 'cash_volume': cash_volume,
