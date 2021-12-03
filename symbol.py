@@ -9,6 +9,12 @@ class TradeData:
         self.start_price = start_price
         self.original_quantity = orig_qty
         self.side = side
+
+        if self.side == 'BUY':
+            self.close_side = 'SELL'
+        else:
+            self.close_side = 'BUY'
+
         self.addons = 1
         self.fixes = 0
 

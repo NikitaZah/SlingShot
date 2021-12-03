@@ -4,13 +4,14 @@ from symbol import Symbol
 from decimal import *
 
 
-class OrderController:
-    def __init__(self, client: Client):
+class BaseOrderController:
+    def __init__(self, client: Client, symbol: Symbol):
         self.client = client
+        self.symbol = symbol
 
-    def __get_price(self, symbol: Symbol, trend='LONG'):
+    def __get_price(self, trend='LONG'):
         try:
-            order_book = self.client.futures_order_book(symbol=symbol.symbol, limit=5)
+            order_book = self.client.futures_order_book(symbol=self.symbol.symbol, limit=5)
         except:
             return None
 
@@ -41,12 +42,11 @@ class OrderController:
 
     def __buy_market(self, symbol: Symbol, percent: Decimal = None, qty: Decimal = None):
         if not qty:
-            price = self.__get_price(symbol, 'LONG')
+            price = self.__get_price('LONG')
             quote_qty = self.__define_quote_qty(percent=percent)
             if not price or not quote_qty:
                 return None
             qty = symbol.quantity(price, quote_qty)
-
 
         try:
             order = self.client.futures_create_order(symbol=symbol.symbol, side=self.client.SIDE_BUY, quantity=qty,
@@ -57,7 +57,7 @@ class OrderController:
 
     def __sell_market(self, symbol: Symbol, percent: Decimal = None, qty: Decimal = None):
         if not qty:
-            price = self.__get_price(symbol, 'SHORT')
+            price = self.__get_price('SHORT')
             quote_qty = self.__define_quote_qty(percent=percent)
             if not price or not quote_qty:
                 return None
@@ -70,14 +70,14 @@ class OrderController:
             order = None
         return order
 
-    def create_market_order(self, symbol: Symbol,  side: str, percent: Decimal = None, qty: Decimal = None, attempts=10):
+    def create_market_order(self,  side: str, percent: Decimal = None, qty: Decimal = None, attempts=10):
         order = None
         if not percent and not qty:
             return None
         elif percent:
-            request = {'symbol': symbol, 'percent': percent}
+            request = {'symbol': self.symbol, 'percent': percent}
         else:
-            request = {'symbol': symbol, 'qty': qty}
+            request = {'symbol': self.symbol, 'qty': qty}
 
         for i in range(attempts):
             if side == 'BUY':
@@ -89,40 +89,40 @@ class OrderController:
         if not order:
             return None
         else:
-            order_info = self.get_order_info(symbol, order['orderId'], filling_wait=True)
+            order_info = self.get_order_info(order['orderId'], filling_wait=True)
             return order_info
 
-    def create_limit_order(self, symbol: Symbol, price: Decimal, percent: Decimal, side: str, attempts=10):
+    def create_limit_order(self, price: Decimal, percent: Decimal, side: str, attempts=10):
         order = None
-        price = price.quantize(symbol.price_step, rounding=ROUND_UP)
+        price = price.quantize(self.symbol.price_step, rounding=ROUND_UP)
         quote_qty = self.__define_quote_qty(percent)
-        qty = symbol.quantity(price, quote_qty)
+        qty = self.symbol.quantity(price, quote_qty)
         for i in range(attempts):
             try:
-                order = self.client.futures_create_order(symbol=symbol.symbol, side=side, quantity=qty,
+                order = self.client.futures_create_order(symbol=self.symbol.symbol, side=side, quantity=qty,
                                                          type=self.client.ORDER_TYPE_LIMIT,
                                                          price=price, timeInForce=self.client.TIME_IN_FORCE_GTC)
             except:
                 pass
         if order:
-            return self.get_order_info(symbol, order['orderId'])
+            return self.get_order_info(order['orderId'])
         return None
 
-    def create_stop_loss_order(self, symbol: Symbol, price: Decimal = None, sl_percent: Decimal = None, attempts=10,
+    def create_stop_loss_order(self, price: Decimal = None, sl_percent: Decimal = None, attempts=10,
                                replace_old=False, order_type: str = 'STOP_MARKET'):
         if not price:
             if not sl_percent:
                 return None
-            price = symbol.sl_price(sl_percent)
+            price = self.symbol.sl_price(sl_percent)
 
-        if symbol.trade_data.side == self.client.SIDE_SELL:
+        if self.symbol.trade_data.side == self.client.SIDE_SELL:
             close_side = self.client.SIDE_BUY
         else:
             close_side = self.client.SIDE_SELL
         order = None
 
         # creating order request for different stop loss types: market and trailing
-        request = {'symbol': symbol.symbol, 'side': close_side, 'type': order_type, 'closePosition': True}
+        request = {'symbol': self.symbol.symbol, 'side': close_side, 'type': order_type, 'closePosition': True}
         if order_type == 'STOP_MARKET':
             request['stopPrice'] = price
         if order_type == 'TRAILING_STOP_MARKET':
@@ -137,42 +137,28 @@ class OrderController:
         if not order:
             return None
         if replace_old:
-            canceled = self.cancel_order(symbol, symbol.trade_data.stop_loss, attempts)
+            canceled = self.cancel_order( self.symbol.trade_data.stop_loss, attempts)
             if not canceled:
                 pass
-        return self.get_order_info(symbol, order['orderId'])
+        return self.get_order_info(order['orderId'])
 
-    def fix_position(self, symbol: Symbol, parts: int):
-        qty = symbol.fix_qty(parts)
-        if symbol.trade_data.side == 'BUY':
-            return self.create_market_order(symbol, 'SELL', qty=qty)
-        else:
-            return self.create_market_order(symbol, 'BUY', qty=qty)
-
-    def close_position(self, symbol: Symbol):
-        qty = symbol.close_qty()
-        if symbol.trade_data.side == 'BUY':
-            return self.create_market_order(symbol, 'SELL', qty=qty)
-        else:
-            return self.create_market_order(symbol, 'BUY', qty=qty)
-
-    def cancel_order(self, symbol: Symbol, order_id: int, attempts=10):
+    def cancel_order(self, order_id: int, attempts=10):
         canceled = None
         for i in range(attempts):
             try:
-                canceled = self.client.futures_cancel_order(symbol=symbol.symbol, orderId=order_id)
+                canceled = self.client.futures_cancel_order(symbol=self.symbol.symbol, orderId=order_id)
                 break
             except:
                 pass
         return canceled
 
-    def get_order_info(self, symbol: Symbol, order_id: int, filling_wait=False):
+    def get_order_info(self, order_id: int, filling_wait=False):
         order = None
         if filling_wait:
             waited = False
             while not waited:
                 try:
-                    order = self.client.futures_get_order(symbol=symbol.symbol, orderId=order_id)
+                    order = self.client.futures_get_order(symbol=self.symbol.symbol, orderId=order_id)
                     if order["status"] == 'FILLED':
                         waited = True
                 except BinanceAPIException as error:
@@ -182,7 +168,7 @@ class OrderController:
                     pass
         else:
             try:
-                order = self.client.futures_get_order(symbol=symbol.symbol, orderId=order_id)
+                order = self.client.futures_get_order(symbol=self.symbol.symbol, orderId=order_id)
             except:
                 order = None
 
@@ -198,3 +184,13 @@ class OrderController:
             return order_info
         else:
             return {}
+
+
+class OrderController(BaseOrderController):
+    def fix_position(self, parts: int):
+        qty = self.symbol.fix_qty(parts)
+        return self.create_market_order(self.symbol.trade_data.close_side, qty=qty)
+
+    def close_position(self):
+        qty = self.symbol.close_qty()
+        return self.create_market_order(self.symbol.trade_data.close_side, qty=qty)
